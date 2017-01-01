@@ -12,7 +12,7 @@ datdir_in = "Other Data Files/"
 years = 1990:2013
 parameter_code = 88101 # for PM 2.5
 within_km = 9.656 # 6 miles  ### 4.828 #3 miles #####   
-observation_percent = 67 # as per EPA suggestion
+observation_percent = 67 
 
 ##--   Get annual PM10 AQS data from EPA
 #-- Downloaded on 7/6/2015 - don't download again unless you're prepared to absorb changes to the raw data (which should be minor)
@@ -141,8 +141,8 @@ length(unique(asos_Monitor$Monitor)) #1581 monitors
 ##   Step 4: Get zipcode level Medicare data, aggregate to the Monitor Level           ##
 ## ----------------------------------------------------------------------------------- ##
 
-##----- Read in (real or simulated) annual zip code level Medicare data
-BIGMED <- fread(paste(datdir_in, "death_Num_den_zipcode-09-03-2015.csv", sep = ""))
+##----- Read in simulated annual zip code level Medicare data
+BIGMED <- fread(paste(datdir_in, "FakeMedicare.csv", sep = ""))
 ## -- Notes on the Denominator Variables in Medicare:
 #   - Person_year_FFS: use this for the hospitalization outcomes, which are only observed for FFS beneficiaries
 #   - Total_den_FFS: use this as the denominator for the _rate variables (e.g., to get the number of Females calculate Female_rate*Total_den_FFS)
@@ -154,36 +154,37 @@ conditions = names(with(BIGMED, table(Condition)))
 condition_list = list()
 for (i in 1:length(conditions)){
   condition_list[[i]] = subset(BIGMED, Condition == conditions[i])
-  condition_list[[i]] = condition_list[[i]][, c("zipcode_R", "year", "Total_admission_FFS"), with = FALSE]
+  condition_list[[i]] = condition_list[[i]][, c("zip", "year", "Total_admission_FFS"), with = FALSE]
   setnames(condition_list[[i]], "Total_admission_FFS", conditions[i])
 }
 
 ## ----- Now make a data set for all_cause death and covariates, which all get their own fields (and are repeated for each value of 'Condition').  
 ## ----- Do this by taking only unique zip/year combinations
-setkeyv(BIGMED, c("zipcode_R", "year"))
+setkeyv(BIGMED, c("zip", "year"))
 BIGMED_unique_zip_year = unique(BIGMED)
 BIGMED_unique_zip_year = BIGMED_unique_zip_year[, !(names(BIGMED_unique_zip_year) %in% c("Condition", "Total_admission_FFS")), with = FALSE]
 
-length(unique(BIGMED_unique_zip_year$zipcode_R)) ## 38475 unique zip codes across all years
+length(unique(BIGMED_unique_zip_year$zip)) ## 38475 unique zip codes across all years
 uzips = rep(NA, length(condition_list))
 for (i in 1:length(condition_list))
-  uzips[i] = length(unique(condition_list[[i]]$zipcode_R))
+  uzips[i] = length(unique(condition_list[[i]]$zip))
 max(uzips) ## maximum number of unique zips in a condition is 38298, so each condition list is a subset of the alldat_unique_zip_year data set
 
-MEDICARE = merge(BIGMED_unique_zip_year, condition_list[[1]], by = c("zipcode_R", "year"), all.x = TRUE)
+MEDICARE = merge(BIGMED_unique_zip_year, condition_list[[1]], by = c("zip", "year"), all.x = TRUE)
 for (i in 2:length(condition_list))
-  MEDICARE = merge(MEDICARE, condition_list[[i]], by = c("zipcode_R", "year"), all.x = TRUE)
+  MEDICARE = merge(MEDICARE, condition_list[[i]], by = c("zip", "year"), all.x = TRUE)
 
-length(unique(MEDICARE$zipcode_R)) #38457 unique zip codes
+length(unique(MEDICARE$zip)) #38457 unique zip codes
 
 MEDICARE$Year = MEDICARE$year
 
 ## -- Unscramble the zip code (zip code is scrambled for data storage purposes)
-temp_zip<-MEDICARE$zipcode_R
-temp_zip<-formatC(temp_zip, width = 5, format = "d", flag = "0")
-zip<-unlist(lapply(temp_zip, function(x) as.numeric(paste(rev(strsplit(as.character(x),"")[[1]]),collapse=""))))
-zip<-formatC(zip, width = 5, format = "d", flag = "0")
-MEDICARE = cbind(MEDICARE, zip)
+# temp_zip<-MEDICARE$zipcode_R
+# temp_zip<-formatC(temp_zip, width = 5, format = "d", flag = "0")
+# zip<-unlist(lapply(temp_zip, function(x) as.numeric(paste(rev(strsplit(as.character(x),"")[[1]]),collapse=""))))
+MEDICARE$zip = as.numeric(MEDICARE$zip)
+MEDICARE$zip<-formatC(MEDICARE$zip, width = 5, format = "d", flag = "0")
+#MEDICARE = cbind(MEDICARE, zip)
 # MEDICARE[order(ZIP), c("zipcode_R", "ZIP"), with = FALSE]
 
 ## - Restrict only to zip codes that have been linked to monitors

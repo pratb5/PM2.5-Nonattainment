@@ -1,3 +1,6 @@
+# install.packages("devtools")
+# library(devtools)
+# devtools::install_github("czigler/HEIfunctions")
 rm(list=ls())
 library(data.table)
 library(HEIfunctions)
