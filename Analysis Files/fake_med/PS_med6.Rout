@@ -1,0 +1,119 @@
+
+R version 3.2.0 (2015-04-16) -- "Full of Ingredients"
+Copyright (C) 2015 The R Foundation for Statistical Computing
+Platform: x86_64-unknown-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> set.seed(51)
+> 
+> load(file="~/PM2.5/pm_withps.Rda")
+> ######## Prune observations that are out of range ###########
+> dat=subset(dat, outofrange==0)
+> dat$pscat = as.factor(dat$pscat)
+> 
+> ######## Set the Working Directory so that output is saved in the right place ######## 
+> wd <- "~/PM2.5/fake_med/"
+> setwd(wd)
+> 
+> ##############################################################
+> ################ Specify the Array Parameters ################
+> ##############################################################
+> 
+> outcomenames = c("total_death_FFS_MA.2012", 
++                  "COPD.2012", "CV_stroke.2012", "HF.2012", "HRD.2012", "IHD.2012",
++                  "PVD.2012", "RTI.2012")  ### The outcomes that will be considered
+> denominators = c("Tot_den_for_death_MA_FFS.2012", rep("Person_year_FFS.2012", length(outcomenames)-1))
+> outfiles = c("mort", "copd", "cvstroke", "hf", "hrd", "ihd", "pvd", "rti")                                       ### To append the output R object name
+> 
+> ##############################################################
+> ###################### Array Starts Here #####################
+> ##############################################################
+> j = as.numeric(Sys.getenv('SLURM_ARRAY_TASK_ID'))
+> print(j)
+[1] 6
+> 
+> ######## Choose which health outcome to use ######## 
+> dat$h = dat[, outcomenames[j]]                                             ### Set h (outcome variable)
+> dat$denom = dat[, denominators[j]]   
+> dat$baseout = dat[, paste(strsplit(outcomenames[j], "[.]")[[1]][1], "2004", sep = ".")]
+> dat$baserate = dat$baseout/dat$denom
+> 
+> ######## Choose how to transform pollution ######## 
+> dat$y = log(dat$pmfu)    #dat$fu - dat$base
+> dat$ytemp=dat$y
+> dat$ytemp[is.na(dat$ytemp)]= mean(dat$y, na.rm=TRUE)
+> 
+> ######## Choose how to specify the models ######## 
+> 
+> ### Medium Models
+> load('~/PM2.5/vars_with_imbalance.RData')
+> vars_with_imbalance
+ [1] "logpop"           "PctBlack"         "PctHisp"          "PctHighSchool"   
+ [5] "PctMovedIn5"      "smokerate2000"    "avgdewpt"         "avgtemp"         
+ [9] "avgrelhum"        "Female_rate.2004"
+> toadjust = vars_with_imbalance[!(vars_with_imbalance %in% c("pmbase", "Tot_den_for_death_MA_FFS.2012"))]
+> medformula = as.formula(paste("h ~", paste(c("pscat", "pmbase2002_2004", toadjust, "baserate", "ytemp", "offset(log(denom))"), collapse = "+")))
+> mh0=glm(medformula, family = poisson(link="log"), data = subset(dat, a==0))
+> mh1=glm(medformula, family = poisson(link="log"), data = subset(dat, a==1))
+> 
+> 
+> library(HEIfunctions)
+> 
+> q=2
+> n=dim(dat)[[1]]
+> nsamp = 51
+> thin = 1
+> alpha0prop=summary(mh0)$cov.unscaled*.8
+> alpha1prop=summary(mh1)$cov.unscaled
+> ypropsd=rep(.75, n*q)
+> 
+> #### Proposals for log(pm) ######
+> ypropsd[seq(1,n*q,q)] = log(dat$pmbase2002_2004)*.15  
+> ypropsd[seq(2,n*q,q)] = log(dat$pmbase2002_2004)*.15 
+> 
+> coords   	<- cbind(dat$Longitude, dat$Latitude)
+> phistart 	<- makephi(coords, 10)
+> philower 	<- makephi(coords, 4) 
+> phiupper 	<- makephi(coords, 30)
+> 
+> tuning = list(A = 0.1, psi = 0.2, theta = 1, alpha0=.09*alpha0prop, alpha1=.09*alpha1prop, Y=ypropsd)
+> prior = list(KIG = rep(.5,2), psi = rep(.5,2), theta1 = rep(philower,2), theta2 = rep(phiupper,2))
+> starting = list(B=NULL, A = NULL, psi = NULL, theta = phistart, alpha0=mh0$coef, alpha1=mh1$coef)
+> 
+> 
+> pollutionformula = as.formula( paste("y ~", paste(all.vars(mh0$formula)[!(all.vars(mh0$formula) %in% c("h", "ytemp", "denom"))], collapse="+"))  )
+> healthformula = as.formula( paste("h ~", paste(all.vars(mh0$formula)[!(all.vars(mh0$formula) %in% c("h", "ytemp", "denom"))], collapse="+"))  )
+> 
+> starttime=proc.time()
+> pstratamod=principalstratmod(
++ formula = pollutionformula, data=dat, trt="a", coords, 
++ formula_h = healthformula, denom="denom", nsamp, thin, tuning, prior, starting,
++ outputbinsize = 10, outputfilename = paste("pstratamod_temp_", outfiles[j], ".Rda", sep=""))
+Loading required package: spBayes
+Loading required package: coda
+Loading required package: magic
+Loading required package: abind
+Loading required package: Formula
+Loading required package: corpcor
+Loading required package: MASS
+[1] "Note: function does not accept missing data in covariates."
+> rtime=proc.time() - starttime
+> save(pstratamod, file = paste("pstratamod_", outfiles[j], ".Rda", sep=""))
+> 
+> 
+> proc.time()
+   user  system elapsed 
+198.848   0.335 202.144 
